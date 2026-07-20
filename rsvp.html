@@ -70,7 +70,11 @@
         })
           .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
           .then(function (out) {
-            if (!out.ok || !out.d.ok) return fail('Invitation not found', 'This invitation may have been removed by the host.');
+            if (!out.ok || !out.d.ok) {
+              return fail('Invitation not found',
+                'This invitation may have been removed by the host.' +
+                (out.d.detail ? ' (' + out.d.detail + ')' : ''));
+            }
             btn.style.display = 'none';
             icon.textContent = yes ? '🎉' : '✓';
             title.textContent = yes ? 'See you there!' : 'Response recorded';
