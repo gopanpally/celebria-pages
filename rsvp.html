@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Celebria — RSVP</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, #FDF8F3 0%, #FBEDE4 100%);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #3D2C2A;
+  }
+  .card {
+    background: #fff; border: 1px solid #EADFD6; border-radius: 24px;
+    padding: 40px 28px; margin: 24px; max-width: 380px; text-align: center;
+    box-shadow: 0 10px 30px rgba(122, 43, 34, 0.08);
+  }
+  .icon {
+    width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px;
+    background: #6B1F2E; display: flex; align-items: center; justify-content: center;
+    font-size: 34px; color: #fff;
+  }
+  h1 { font-size: 22px; margin: 0 0 10px; }
+  p  { font-size: 15px; line-height: 1.55; color: #7A6A63; margin: 0; }
+  .btn {
+    display: block; width: 100%; margin-top: 22px; padding: 14px 0; border: 0;
+    border-radius: 14px; font-size: 16px; cursor: pointer;
+    background: #6B1F2E; color: #fff;
+  }
+  .btn[disabled] { opacity: 0.6; cursor: default; }
+  .brand { margin-top: 26px; font-size: 12px; letter-spacing: 2px; color: #B9A79C; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="icon">💌</div>
+    <h1 id="title">One tap to RSVP</h1>
+    <p id="msg">Loading your invitation…</p>
+    <button class="btn" id="btn" style="display:none"></button>
+    <div class="brand">Celebria · Where Celebration Begins</div>
+  </div>
+  <script>
+    // The email buttons land here with ?g=<guest>&r=confirmed|declined. The
+    // actual write happens only on the explicit tap below, so inbox link
+    // scanners can never RSVP on a guest's behalf.
+    var FN = 'https://vtzzdlntyvtxyaerzynn.supabase.co/functions/v1/rsvp';
+    var p = new URLSearchParams(location.search);
+    var g = p.get('g'), r = p.get('r');
+    var icon = document.getElementById('icon'),
+        title = document.getElementById('title'),
+        msg = document.getElementById('msg'),
+        btn = document.getElementById('btn');
+
+    function fail(t, m) { icon.textContent = '!'; title.textContent = t; msg.textContent = m; btn.style.display = 'none'; }
+
+    if (!g || (r !== 'confirmed' && r !== 'declined')) {
+      fail('Link incomplete', 'Please use the buttons in your invitation email.');
+    } else {
+      var yes = r === 'confirmed';
+      title.textContent = yes ? 'Lovely to have you!' : 'Sorry you can’t make it';
+      msg.textContent = 'Tap below to confirm your response to the host.';
+      btn.style.display = 'block';
+      btn.textContent = yes ? '✅ Yes, I’ll be there' : 'Confirm: can’t make it';
+      btn.onclick = function () {
+        btn.disabled = true; btn.textContent = 'Sending…';
+        fetch(FN, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ g: g, r: r }),
+        })
+          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+          .then(function (out) {
+            if (!out.ok || !out.d.ok) return fail('Invitation not found', 'This invitation may have been removed by the host.');
+            btn.style.display = 'none';
+            icon.textContent = yes ? '🎉' : '✓';
+            title.textContent = yes ? 'See you there!' : 'Response recorded';
+            msg.textContent = 'Thank you' + (out.d.guestName ? ', ' + out.d.guestName : '') +
+              '! Your RSVP for ' + (out.d.eventName || 'the celebration') + ' has been shared with the hosts.';
+          })
+          .catch(function () { fail('Connection trouble', 'Please try the link again in a moment.'); });
+      };
+    }
+  </script>
+</body>
+</html>
