@@ -28,6 +28,10 @@
     background: #6B1F2E; color: #fff;
   }
   .btn[disabled] { opacity: 0.6; cursor: default; }
+  .cal {
+    display: block; margin-top: 10px; padding: 12px 0; border-radius: 14px;
+    border: 1px solid #6B1F2E; color: #6B1F2E; text-decoration: none; font-size: 15px;
+  }
   .brand { margin-top: 26px; font-size: 12px; letter-spacing: 2px; color: #B9A79C; text-transform: uppercase; }
 </style>
 </head>
@@ -37,6 +41,7 @@
     <h1 id="title">One tap to RSVP</h1>
     <p id="msg">Loading your invitation…</p>
     <button class="btn" id="btn" style="display:none"></button>
+    <div id="cal" style="display:none"></div>
     <div class="brand">Celebria · Where Celebration Begins</div>
   </div>
   <script>
@@ -49,9 +54,35 @@
     var icon = document.getElementById('icon'),
         title = document.getElementById('title'),
         msg = document.getElementById('msg'),
-        btn = document.getElementById('btn');
+        btn = document.getElementById('btn'),
+        cal = document.getElementById('cal');
 
     function fail(t, m) { icon.textContent = '!'; title.textContent = t; msg.textContent = m; btn.style.display = 'none'; }
+
+    // "Add to calendar" for guests who accepted: a Google Calendar template
+    // link, plus a client-generated .ics download for Apple/Outlook.
+    function showCalendar(name, isoDate, city) {
+      if (!isoDate) return;
+      var s = isoDate.replace(/-/g, '');
+      var end = new Date(isoDate + 'T12:00:00Z');
+      end.setUTCDate(end.getUTCDate() + 1);
+      var e = end.toISOString().slice(0, 10).replace(/-/g, '');
+      var g = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+        '&text=' + encodeURIComponent(name) + '&dates=' + s + '/' + e +
+        (city ? '&location=' + encodeURIComponent(city) : '');
+      var ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Celebria//EN',
+        'BEGIN:VEVENT', 'UID:' + Date.now() + '@celebria',
+        'DTSTAMP:' + new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z',
+        'DTSTART;VALUE=DATE:' + s, 'DTEND;VALUE=DATE:' + e,
+        'SUMMARY:' + name.replace(/[,;\\]/g, ' ')]
+        .concat(city ? ['LOCATION:' + city.replace(/[,;\\]/g, ' ')] : [])
+        .concat(['END:VEVENT', 'END:VCALENDAR']).join('\r\n');
+      var blob = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+      cal.innerHTML =
+        '<a class="cal" href="' + g + '" target="_blank" rel="noopener">📅 Add to Google Calendar</a>' +
+        '<a class="cal" href="' + blob + '" download="celebria-event.ics">🍎 Apple / Outlook (.ics)</a>';
+      cal.style.display = 'block';
+    }
 
     if (!g || (r !== 'confirmed' && r !== 'declined')) {
       fail('Link incomplete', 'Please use the buttons in your invitation email.');
@@ -80,6 +111,7 @@
             title.textContent = yes ? 'See you there!' : 'Response recorded';
             msg.textContent = 'Thank you' + (out.d.guestName ? ', ' + out.d.guestName : '') +
               '! Your RSVP for ' + (out.d.eventName || 'the celebration') + ' has been shared with the hosts.';
+            if (yes) showCalendar(out.d.eventName || 'Celebration', out.d.eventDate, out.d.city);
           })
           .catch(function () { fail('Connection trouble', 'Please try the link again in a moment.'); });
       };
