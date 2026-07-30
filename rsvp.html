@@ -33,6 +33,32 @@
     border: 1px solid #6B1F2E; color: #6B1F2E; text-decoration: none; font-size: 15px;
   }
   .brand { margin-top: 26px; font-size: 12px; letter-spacing: 2px; color: #B9A79C; text-transform: uppercase; }
+
+  /* Follow-up step: headcount + food preference, shown only after "Yes". */
+  .field { text-align: left; margin-top: 22px; }
+  .field label {
+    display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.4px;
+    text-transform: uppercase; color: #9A857B; margin-bottom: 7px;
+  }
+  .stepper { display: flex; align-items: center; gap: 14px; }
+  .stepper button {
+    width: 40px; height: 40px; border-radius: 12px; border: 1px solid #EADFD6;
+    background: #FBF3EA; color: #6B1F2E; font-size: 19px; cursor: pointer;
+  }
+  .stepper button:active { background: #F2E3D6; }
+  .stepper span {
+    flex: 1; text-align: center; font-size: 20px; font-weight: 600;
+  }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    padding: 9px 15px; border-radius: 99px; border: 1px solid #EADFD6;
+    background: #FBF3EA; color: #3D2C2A; font-size: 13.5px; cursor: pointer;
+  }
+  .pill.sel { background: #6B1F2E; border-color: #6B1F2E; color: #fff; }
+  .skip {
+    display: block; margin-top: 16px; font-size: 13px; color: #9A857B;
+    text-decoration: underline; background: none; border: 0; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -41,6 +67,22 @@
     <h1 id="title">One tap to RSVP</h1>
     <p id="msg">Loading your invitation…</p>
     <button class="btn" id="btn" style="display:none"></button>
+    <div id="details" style="display:none">
+      <div class="field">
+        <label>How many people from your family are attending?</label>
+        <div class="stepper">
+          <button type="button" id="minus">−</button>
+          <span id="count">1</span>
+          <button type="button" id="plus">+</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>What's your food preference?</label>
+        <div class="pills" id="foods"></div>
+      </div>
+      <button class="btn" id="saveDetails">Save</button>
+      <button class="skip" id="skipDetails" type="button">Skip this for now</button>
+    </div>
     <div id="cal" style="display:none"></div>
     <div class="brand">Celebria · Where Celebration Begins</div>
   </div>
@@ -49,15 +91,20 @@
     // actual write happens only on the explicit tap below, so inbox link
     // scanners can never RSVP on a guest's behalf.
     var FN = 'https://vtzzdlntyvtxyaerzynn.supabase.co/functions/v1/rsvp';
+    var FOODS = ['Veg', 'Non-Veg', 'Jain', 'Vegan'];
     var p = new URLSearchParams(location.search);
     var g = p.get('g'), r = p.get('r');
     var icon = document.getElementById('icon'),
         title = document.getElementById('title'),
         msg = document.getElementById('msg'),
         btn = document.getElementById('btn'),
+        details = document.getElementById('details'),
+        countEl = document.getElementById('count'),
+        foodsEl = document.getElementById('foods'),
         cal = document.getElementById('cal');
+    var count = 1, food = null;
 
-    function fail(t, m) { icon.textContent = '!'; title.textContent = t; msg.textContent = m; btn.style.display = 'none'; }
+    function fail(t, m) { icon.textContent = '!'; title.textContent = t; msg.textContent = m; btn.style.display = 'none'; details.style.display = 'none'; }
 
     // "Add to calendar" for guests who accepted: a Google Calendar template
     // link, plus a client-generated .ics download for Apple/Outlook.
@@ -67,7 +114,7 @@
       var end = new Date(isoDate + 'T12:00:00Z');
       end.setUTCDate(end.getUTCDate() + 1);
       var e = end.toISOString().slice(0, 10).replace(/-/g, '');
-      var g = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+      var gcal = 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
         '&text=' + encodeURIComponent(name) + '&dates=' + s + '/' + e +
         (city ? '&location=' + encodeURIComponent(city) : '');
       var ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Celebria//EN',
@@ -79,9 +126,29 @@
         .concat(['END:VEVENT', 'END:VCALENDAR']).join('\r\n');
       var blob = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
       cal.innerHTML =
-        '<a class="cal" href="' + g + '" target="_blank" rel="noopener">📅 Add to Google Calendar</a>' +
+        '<a class="cal" href="' + gcal + '" target="_blank" rel="noopener">📅 Add to Google Calendar</a>' +
         '<a class="cal" href="' + blob + '" download="celebria-event.ics">🍎 Apple / Outlook (.ics)</a>';
       cal.style.display = 'block';
+    }
+
+    function showThanks(d) {
+      icon.textContent = r === 'confirmed' ? '🎉' : '✓';
+      title.textContent = r === 'confirmed' ? 'See you there!' : 'Response recorded';
+      msg.textContent = 'Thank you' + (d.guestName ? ', ' + d.guestName : '') +
+        '! Your RSVP for ' + (d.eventName || 'the celebration') + ' has been shared with the hosts.';
+      if (r === 'confirmed') showCalendar(d.eventName || 'Celebration', d.eventDate, d.city);
+    }
+
+    // One request handles both the initial Yes/No tap and the optional
+    // follow-up (partyCount/food are simply omitted on the first call).
+    function post(extra) {
+      var body = { g: g, r: r };
+      if (extra) { body.partyCount = extra.partyCount; body.food = extra.food; }
+      return fetch(FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); });
     }
 
     if (!g || (r !== 'confirmed' && r !== 'declined')) {
@@ -92,28 +159,58 @@
       msg.textContent = 'Tap below to confirm your response to the host.';
       btn.style.display = 'block';
       btn.textContent = yes ? '✅ Yes, I’ll be there' : 'Confirm: can’t make it';
+
+      var lastResult = null;
+
       btn.onclick = function () {
         btn.disabled = true; btn.textContent = 'Sending…';
-        fetch(FN, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ g: g, r: r }),
-        })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
-          .then(function (out) {
-            if (!out.ok || !out.d.ok) {
-              return fail('Invitation not found',
-                'This invitation may have been removed by the host.' +
-                (out.d.detail ? ' (' + out.d.detail + ')' : ''));
-            }
-            btn.style.display = 'none';
-            icon.textContent = yes ? '🎉' : '✓';
-            title.textContent = yes ? 'See you there!' : 'Response recorded';
-            msg.textContent = 'Thank you' + (out.d.guestName ? ', ' + out.d.guestName : '') +
-              '! Your RSVP for ' + (out.d.eventName || 'the celebration') + ' has been shared with the hosts.';
-            if (yes) showCalendar(out.d.eventName || 'Celebration', out.d.eventDate, out.d.city);
-          })
-          .catch(function () { fail('Connection trouble', 'Please try the link again in a moment.'); });
+        post(null).then(function (out) {
+          if (!out.ok || !out.d.ok) {
+            return fail('Invitation not found',
+              'This invitation may have been removed by the host.' +
+              (out.d.detail ? ' (' + out.d.detail + ')' : ''));
+          }
+          lastResult = out.d;
+          btn.style.display = 'none';
+          if (yes) {
+            // Politely ask for headcount + food before the final thank-you —
+            // declines skip straight there, nothing to plan food for.
+            msg.textContent = 'One more thing, so the hosts can plan the food properly:';
+            foodsEl.innerHTML = '';
+            FOODS.forEach(function (f) {
+              var b = document.createElement('button');
+              b.type = 'button'; b.className = 'pill'; b.textContent = f;
+              b.onclick = function () {
+                food = f;
+                Array.prototype.forEach.call(foodsEl.children, function (c) { c.classList.remove('sel'); });
+                b.classList.add('sel');
+              };
+              foodsEl.appendChild(b);
+            });
+            food = FOODS[0]; foodsEl.children[0].classList.add('sel');
+            details.style.display = 'block';
+          } else {
+            showThanks(lastResult);
+          }
+        }).catch(function () { fail('Connection trouble', 'Please try the link again in a moment.'); });
+      };
+
+      document.getElementById('minus').onclick = function () { count = Math.max(1, count - 1); countEl.textContent = count; };
+      document.getElementById('plus').onclick = function () { count = Math.min(50, count + 1); countEl.textContent = count; };
+
+      document.getElementById('saveDetails').onclick = function (e) {
+        e.target.disabled = true; e.target.textContent = 'Saving…';
+        post({ partyCount: count, food: food }).then(function (out) {
+          details.style.display = 'none';
+          showThanks((out.ok && out.d.ok) ? out.d : lastResult);
+        }).catch(function () {
+          details.style.display = 'none';
+          showThanks(lastResult);
+        });
+      };
+      document.getElementById('skipDetails').onclick = function () {
+        details.style.display = 'none';
+        showThanks(lastResult);
       };
     }
   </script>
