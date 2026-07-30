@@ -67,6 +67,7 @@
     <h1 id="title">One tap to RSVP</h1>
     <p id="msg">Loading your invitation…</p>
     <button class="btn" id="btn" style="display:none"></button>
+    <button class="skip" id="keepBtn" type="button" style="display:none">Keep my previous response</button>
     <div id="details" style="display:none">
       <div class="field">
         <label>How many people from your family are attending?</label>
@@ -98,13 +99,17 @@
         title = document.getElementById('title'),
         msg = document.getElementById('msg'),
         btn = document.getElementById('btn'),
+        keepBtn = document.getElementById('keepBtn'),
         details = document.getElementById('details'),
         countEl = document.getElementById('count'),
         foodsEl = document.getElementById('foods'),
         cal = document.getElementById('cal');
     var count = 1, food = null;
 
-    function fail(t, m) { icon.textContent = '!'; title.textContent = t; msg.textContent = m; btn.style.display = 'none'; details.style.display = 'none'; }
+    function fail(t, m) {
+      icon.textContent = '!'; title.textContent = t; msg.textContent = m;
+      btn.style.display = 'none'; keepBtn.style.display = 'none'; details.style.display = 'none';
+    }
 
     // "Add to calendar" for guests who accepted: a Google Calendar template
     // link, plus a client-generated .ics download for Apple/Outlook.
@@ -155,15 +160,12 @@
       fail('Link incomplete', 'Please use the buttons in your invitation email.');
     } else {
       var yes = r === 'confirmed';
-      title.textContent = yes ? 'Lovely to have you!' : 'Sorry you can’t make it';
-      msg.textContent = 'Tap below to confirm your response to the host.';
-      btn.style.display = 'block';
-      btn.textContent = yes ? '✅ Yes, I’ll be there' : 'Confirm: can’t make it';
-
+      var targetStatus = yes ? 'Accepted' : 'Declined';
       var lastResult = null;
 
-      btn.onclick = function () {
+      function doPost() {
         btn.disabled = true; btn.textContent = 'Sending…';
+        keepBtn.style.display = 'none';
         post(null).then(function (out) {
           if (!out.ok || !out.d.ok) {
             return fail('Invitation not found',
@@ -175,6 +177,7 @@
           if (yes) {
             // Politely ask for headcount + food before the final thank-you —
             // declines skip straight there, nothing to plan food for.
+            icon.textContent = '🎉'; title.textContent = 'Lovely to have you!';
             msg.textContent = 'One more thing, so the hosts can plan the food properly:';
             foodsEl.innerHTML = '';
             FOODS.forEach(function (f) {
@@ -193,7 +196,58 @@
             showThanks(lastResult);
           }
         }).catch(function () { fail('Connection trouble', 'Please try the link again in a moment.'); });
-      };
+      }
+
+      // First-time (or repeat-same-answer) response: the plain single-tap
+      // prompt, unchanged from before.
+      function showPrompt() {
+        icon.textContent = yes ? '💌' : '💌';
+        title.textContent = yes ? 'Lovely to have you!' : 'Sorry you can’t make it';
+        msg.textContent = 'Tap below to confirm your response to the host.';
+        btn.style.display = 'block';
+        btn.textContent = yes ? '✅ Yes, I’ll be there' : 'Confirm: can’t make it';
+        keepBtn.style.display = 'none';
+        btn.onclick = doPost;
+      }
+
+      // The guest already answered differently and is now switching — make
+      // them confirm the change instead of silently overwriting their
+      // earlier reply (works the same both directions: accepted→declined
+      // and declined→accepted).
+      function showChangeConfirm(priorStatus) {
+        icon.textContent = '↺';
+        title.textContent = 'You already responded';
+        var priorLabel = priorStatus === 'Accepted' ? 'you’d be there' : 'you couldn’t make it';
+        var newLabel = yes ? '“Yes, I’ll be there”' : '“Can’t make it”';
+        msg.textContent = 'You previously told us ' + priorLabel + '. Would you like to change your response to ' + newLabel + '?';
+        btn.style.display = 'block';
+        btn.textContent = yes ? 'Yes, change to attending' : 'Yes, change to not attending';
+        btn.onclick = doPost;
+        keepBtn.style.display = 'block';
+        keepBtn.textContent = 'No, keep my previous response';
+        keepBtn.onclick = function () {
+          icon.textContent = '✓'; title.textContent = 'No changes made';
+          msg.textContent = 'Your response stays as it was — thanks for double-checking!';
+          btn.style.display = 'none'; keepBtn.style.display = 'none';
+        };
+      }
+
+      // Read the guest's CURRENT stored answer first (read-only — never
+      // writes) so we know whether this tap is a fresh response or a
+      // changed one, before showing either prompt above.
+      title.textContent = 'One tap to RSVP';
+      msg.textContent = 'Loading your invitation…';
+      fetch(FN + '?g=' + encodeURIComponent(g) + '&check=1')
+        .then(function (res) { return res.json(); })
+        .then(function (out) {
+          var prior = out && out.ok ? out.status : null;
+          if (prior && prior !== 'Pending' && prior !== targetStatus) {
+            showChangeConfirm(prior);
+          } else {
+            showPrompt();
+          }
+        })
+        .catch(function () { showPrompt(); }); // status check failing shouldn't block RSVP-ing
 
       document.getElementById('minus').onclick = function () { count = Math.max(1, count - 1); countEl.textContent = count; };
       document.getElementById('plus').onclick = function () { count = Math.min(50, count + 1); countEl.textContent = count; };
