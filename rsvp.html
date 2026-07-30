@@ -280,18 +280,24 @@
         btn.onclick = doPost;
       }
 
-      // The guest already answered differently and is now switching — make
-      // them confirm the change instead of silently overwriting their
-      // earlier reply (works the same both directions: accepted→declined
-      // and declined→accepted).
+      // The guest already responded — tapping ANY Yes/No link again (even
+      // the same one) now confirms first, rather than silently re-writing
+      // or overwriting their earlier reply. Wording adapts to whether this
+      // tap would change the answer or just repeat it.
       function showChangeConfirm(priorStatus) {
         icon.textContent = '↺';
         title.textContent = 'You already responded';
         var priorLabel = priorStatus === 'Accepted' ? 'you’d be there' : 'you couldn’t make it';
-        var newLabel = yes ? '“Yes, I’ll be there”' : '“Can’t make it”';
-        msg.textContent = 'You previously told us ' + priorLabel + '. Would you like to change your response to ' + newLabel + '?';
+        var sameAnswer = priorStatus === targetStatus;
+        if (sameAnswer) {
+          msg.textContent = 'You already told us ' + priorLabel + '. Do you still want to confirm this again?';
+          btn.textContent = 'Yes, confirm again';
+        } else {
+          var newLabel = yes ? '“Yes, I’ll be there”' : '“Can’t make it”';
+          msg.textContent = 'You previously told us ' + priorLabel + '. Would you like to change your response to ' + newLabel + '?';
+          btn.textContent = yes ? 'Yes, change to attending' : 'Yes, change to not attending';
+        }
         btn.style.display = 'block';
-        btn.textContent = yes ? 'Yes, change to attending' : 'Yes, change to not attending';
         btn.onclick = doPost;
         keepBtn.style.display = 'block';
         keepBtn.textContent = 'No, keep my previous response';
@@ -303,15 +309,16 @@
       }
 
       // Read the guest's CURRENT stored answer first (read-only — never
-      // writes) so we know whether this tap is a fresh response or a
-      // changed one, before showing either prompt above.
+      // writes) so we know they've already responded before either prompt
+      // above shows — any repeat tap (same answer or a change) gets the
+      // confirm step; only a genuinely first-time reply skips straight in.
       title.textContent = 'One tap to RSVP';
       msg.textContent = 'Loading your invitation…';
       fetch(FN + '?g=' + encodeURIComponent(g) + '&check=1')
         .then(function (res) { return res.json(); })
         .then(function (out) {
           var prior = out && out.ok ? out.status : null;
-          if (prior && prior !== 'Pending' && prior !== targetStatus) {
+          if (prior && prior !== 'Pending') {
             showChangeConfirm(prior);
           } else {
             showPrompt();
