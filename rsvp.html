@@ -113,28 +113,23 @@
         saveBtn = document.getElementById('saveDetails'),
         cal = document.getElementById('cal');
     var count = 1;
-    // Per-food-type headcount, e.g. {Veg: 2, 'Non-Veg': 1} — starts with
-    // everyone under the first option so the common (single-diet) case
-    // needs zero taps, same as before; a mixed party just moves some
-    // people over to another row.
+    // Per-food-type headcount, e.g. {Veg: 2, 'Non-Veg': 1} — every type
+    // starts at 0 (no default diet assumed) and the guest must explicitly
+    // assign all `count` people before Save unlocks.
     var foodCounts = {};
 
-    // Keeps the food breakdown in sync with the headcount stepper: growing
-    // the party adds the new people as the first food type (adjust from
-    // there); shrinking it trims from whichever type currently has people,
-    // so the total can never silently drift out of sync.
+    // Keeps the food breakdown in sync with the headcount stepper. Only
+    // ever TRIMS (when shrinking the party below what's already assigned) —
+    // it never auto-assigns new people to a food type, since nothing should
+    // be picked on the guest's behalf. Growing the party just raises the
+    // target total, leaving the new person(s) unassigned until chosen.
     function syncFoodTotal(newCount) {
       var total = FOODS.reduce(function (s, f) { return s + (foodCounts[f] || 0); }, 0);
-      var diff = newCount - total;
-      if (diff > 0) {
-        foodCounts[FOODS[0]] = (foodCounts[FOODS[0]] || 0) + diff;
-      } else if (diff < 0) {
-        var toRemove = -diff;
-        for (var i = FOODS.length - 1; i >= 0 && toRemove > 0; i--) {
-          var take = Math.min(toRemove, foodCounts[FOODS[i]] || 0);
-          foodCounts[FOODS[i]] = (foodCounts[FOODS[i]] || 0) - take;
-          toRemove -= take;
-        }
+      var toRemove = total - newCount;
+      for (var i = FOODS.length - 1; i >= 0 && toRemove > 0; i--) {
+        var take = Math.min(toRemove, foodCounts[FOODS[i]] || 0);
+        foodCounts[FOODS[i]] = (foodCounts[FOODS[i]] || 0) - take;
+        toRemove -= take;
       }
       count = newCount;
       renderFoodRows();
@@ -161,6 +156,10 @@
           updateFoodUI();
         };
         plus.onclick = function () {
+          // Hard cap — the split can never add up to more than the party
+          // size, not just get flagged as wrong after the fact.
+          var total = FOODS.reduce(function (s, x) { return s + (foodCounts[x] || 0); }, 0);
+          if (total >= count) return;
           foodCounts[f] = (foodCounts[f] || 0) + 1;
           updateFoodUI();
         };
@@ -260,7 +259,7 @@
             // declines skip straight there, nothing to plan food for.
             icon.textContent = '🎉'; title.textContent = 'Lovely to have you!';
             msg.textContent = 'One more thing, so the hosts can plan the food properly:';
-            foodCounts = {}; foodCounts[FOODS[0]] = count;
+            foodCounts = {}; // nothing pre-selected — the guest must assign every person
             renderFoodRows();
             details.style.display = 'block';
           } else {
