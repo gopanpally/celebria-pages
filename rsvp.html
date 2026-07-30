@@ -49,12 +49,17 @@
   .stepper span {
     flex: 1; text-align: center; font-size: 20px; font-weight: 600;
   }
-  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
-  .pill {
-    padding: 9px 15px; border-radius: 99px; border: 1px solid #EADFD6;
-    background: #FBF3EA; color: #3D2C2A; font-size: 13.5px; cursor: pointer;
+  /* Per-food-type headcount rows — a party doesn't always share one diet. */
+  .foodRow {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
   }
-  .pill.sel { background: #6B1F2E; border-color: #6B1F2E; color: #fff; }
+  .foodRow .foodName { flex: 1; font-size: 14.5px; }
+  .foodRow .stepper { gap: 8px; }
+  .foodRow .stepper button { width: 32px; height: 32px; font-size: 16px; border-radius: 9px; }
+  .foodRow .stepper span { font-size: 15px; min-width: 18px; flex: none; }
+  .foodTotal {
+    font-size: 12.5px; font-weight: 600; margin-top: 4px; text-align: right;
+  }
   .skip {
     display: block; margin-top: 16px; font-size: 13px; color: #9A857B;
     text-decoration: underline; background: none; border: 0; cursor: pointer;
@@ -78,8 +83,9 @@
         </div>
       </div>
       <div class="field">
-        <label>What's your food preference?</label>
-        <div class="pills" id="foods"></div>
+        <label>Food preference for your group</label>
+        <div id="foods"></div>
+        <div class="foodTotal" id="foodTotal"></div>
       </div>
       <button class="btn" id="saveDetails">Save</button>
       <button class="skip" id="skipDetails" type="button">Skip this for now</button>
@@ -103,8 +109,83 @@
         details = document.getElementById('details'),
         countEl = document.getElementById('count'),
         foodsEl = document.getElementById('foods'),
+        foodTotalEl = document.getElementById('foodTotal'),
+        saveBtn = document.getElementById('saveDetails'),
         cal = document.getElementById('cal');
-    var count = 1, food = null;
+    var count = 1;
+    // Per-food-type headcount, e.g. {Veg: 2, 'Non-Veg': 1} — starts with
+    // everyone under the first option so the common (single-diet) case
+    // needs zero taps, same as before; a mixed party just moves some
+    // people over to another row.
+    var foodCounts = {};
+
+    // Keeps the food breakdown in sync with the headcount stepper: growing
+    // the party adds the new people as the first food type (adjust from
+    // there); shrinking it trims from whichever type currently has people,
+    // so the total can never silently drift out of sync.
+    function syncFoodTotal(newCount) {
+      var total = FOODS.reduce(function (s, f) { return s + (foodCounts[f] || 0); }, 0);
+      var diff = newCount - total;
+      if (diff > 0) {
+        foodCounts[FOODS[0]] = (foodCounts[FOODS[0]] || 0) + diff;
+      } else if (diff < 0) {
+        var toRemove = -diff;
+        for (var i = FOODS.length - 1; i >= 0 && toRemove > 0; i--) {
+          var take = Math.min(toRemove, foodCounts[FOODS[i]] || 0);
+          foodCounts[FOODS[i]] = (foodCounts[FOODS[i]] || 0) - take;
+          toRemove -= take;
+        }
+      }
+      count = newCount;
+      renderFoodRows();
+    }
+
+    function renderFoodRows() {
+      foodsEl.innerHTML = '';
+      FOODS.forEach(function (f) {
+        var row = document.createElement('div');
+        row.className = 'foodRow';
+        var name = document.createElement('span');
+        name.className = 'foodName'; name.textContent = f;
+        var stepper = document.createElement('div');
+        stepper.className = 'stepper';
+        var minus = document.createElement('button');
+        minus.type = 'button'; minus.textContent = '−';
+        var span = document.createElement('span');
+        span.textContent = foodCounts[f] || 0;
+        var plus = document.createElement('button');
+        plus.type = 'button'; plus.textContent = '+';
+        minus.onclick = function () {
+          if ((foodCounts[f] || 0) <= 0) return;
+          foodCounts[f] = foodCounts[f] - 1;
+          updateFoodUI();
+        };
+        plus.onclick = function () {
+          foodCounts[f] = (foodCounts[f] || 0) + 1;
+          updateFoodUI();
+        };
+        stepper.appendChild(minus); stepper.appendChild(span); stepper.appendChild(plus);
+        row.appendChild(name); row.appendChild(stepper);
+        foodsEl.appendChild(row);
+      });
+      updateFoodUI();
+    }
+
+    // Re-renders just the numbers/total (not the whole DOM) after a tap —
+    // and gates Save on the breakdown actually adding up to the headcount,
+    // so a mis-tallied split can't quietly reach the hosts.
+    function updateFoodUI() {
+      var rows = foodsEl.children;
+      FOODS.forEach(function (f, i) {
+        rows[i].querySelector('.stepper span').textContent = foodCounts[f] || 0;
+      });
+      var total = FOODS.reduce(function (s, f) { return s + (foodCounts[f] || 0); }, 0);
+      var ok = total === count;
+      foodTotalEl.textContent = total + ' of ' + count + ' assigned' + (ok ? ' ✓' : '');
+      foodTotalEl.style.color = ok ? '#2E7D5B' : '#C2554E';
+      saveBtn.disabled = !ok;
+      saveBtn.style.opacity = ok ? '1' : '0.55';
+    }
 
     function fail(t, m) {
       icon.textContent = '!'; title.textContent = t; msg.textContent = m;
@@ -148,7 +229,7 @@
     // follow-up (partyCount/food are simply omitted on the first call).
     function post(extra) {
       var body = { g: g, r: r };
-      if (extra) { body.partyCount = extra.partyCount; body.food = extra.food; }
+      if (extra) { body.partyCount = extra.partyCount; body.foodBreakdown = extra.foodBreakdown; }
       return fetch(FN, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,18 +260,8 @@
             // declines skip straight there, nothing to plan food for.
             icon.textContent = '🎉'; title.textContent = 'Lovely to have you!';
             msg.textContent = 'One more thing, so the hosts can plan the food properly:';
-            foodsEl.innerHTML = '';
-            FOODS.forEach(function (f) {
-              var b = document.createElement('button');
-              b.type = 'button'; b.className = 'pill'; b.textContent = f;
-              b.onclick = function () {
-                food = f;
-                Array.prototype.forEach.call(foodsEl.children, function (c) { c.classList.remove('sel'); });
-                b.classList.add('sel');
-              };
-              foodsEl.appendChild(b);
-            });
-            food = FOODS[0]; foodsEl.children[0].classList.add('sel');
+            foodCounts = {}; foodCounts[FOODS[0]] = count;
+            renderFoodRows();
             details.style.display = 'block';
           } else {
             showThanks(lastResult);
@@ -249,12 +320,19 @@
         })
         .catch(function () { showPrompt(); }); // status check failing shouldn't block RSVP-ing
 
-      document.getElementById('minus').onclick = function () { count = Math.max(1, count - 1); countEl.textContent = count; };
-      document.getElementById('plus').onclick = function () { count = Math.min(50, count + 1); countEl.textContent = count; };
+      document.getElementById('minus').onclick = function () {
+        if (count <= 1) return;
+        countEl.textContent = count - 1; syncFoodTotal(count - 1);
+      };
+      document.getElementById('plus').onclick = function () {
+        if (count >= 50) return;
+        countEl.textContent = count + 1; syncFoodTotal(count + 1);
+      };
 
-      document.getElementById('saveDetails').onclick = function (e) {
-        e.target.disabled = true; e.target.textContent = 'Saving…';
-        post({ partyCount: count, food: food }).then(function (out) {
+      saveBtn.onclick = function (e) {
+        if (saveBtn.disabled) return;
+        e.target.disabled = true; e.target.textContent = 'Saving…'; e.target.style.opacity = '1';
+        post({ partyCount: count, foodBreakdown: foodCounts }).then(function (out) {
           details.style.display = 'none';
           showThanks((out.ok && out.d.ok) ? out.d : lastResult);
         }).catch(function () {
